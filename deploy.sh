@@ -460,7 +460,7 @@ sudo -u "$APP_USER" npm install --omit=dev --ignore-scripts
 # Installer les dépendances frontend
 info "Installation des dépendances frontend..."
 cd "$APP_DIR/frontend"
-sudo -u "$APP_USER" npm install
+sudo -u "$APP_USER" npm install --ignore-scripts
 
 # Construire le frontend
 info "Build du frontend..."
@@ -575,9 +575,9 @@ module.exports = {
     },
     {
       name: 'nxt-frontend',
-      script: 'npx',
+      script: '/usr/bin/npx',
       args: 'serve -s -l 127.0.0.1:${FRONTEND_PORT} dist',
-      cwd: './frontend',
+      cwd: '${APP_DIR}/frontend',
       instances: 1,
       autorestart: true,
       watch: false,
