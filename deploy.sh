@@ -252,8 +252,28 @@ systemctl enable mariadb
 systemctl start mariadb
 
 info "Sécurisation de MariaDB..."
-#mysql_secure_installation automatique
-mysql -u root <<MYSQLSECURE
+# Essayer sans mot de passe d'abord (première installation)
+# puis avec le mot de passe si le script a déjà été lancé
+MYSQL_ROOT_CMD=""
+if mysql -u root -e "SELECT 1;" &>/dev/null; then
+    MYSQL_ROOT_CMD="mysql -u root"
+    info "Connexion root MySQL sans mot de passe — première installation"
+elif [[ -f /root/.mysql_root_pass ]]; then
+    PREV_PASS=$(cat /root/.mysql_root_pass)
+    if mysql -u root -p"${PREV_PASS}" -e "SELECT 1;" &>/dev/null; then
+        MYSQL_ROOT_CMD="mysql -u root -p${PREV_PASS}"
+        info "Connexion root MySQL avec mot de passe existant — re-run détecté"
+    fi
+fi
+
+if [[ -z "$MYSQL_ROOT_CMD" ]]; then
+    warn "Impossible de se connecter à MySQL root — sécurité déjà appliquée ou mot de passe inconnu"
+    warn "Si vous connaissez le mot de passe root, mettez-le dans /root/.mysql_root_pass"
+    warn "Ou réinitialisez : sudo systemctl stop mariadb && sudo mysqld_safe --skip-grant-tables &"
+fi
+
+if [[ -n "$MYSQL_ROOT_CMD" ]]; then
+    $MYSQL_ROOT_CMD <<MYSQLSECURE
 -- Supprimer les utilisateurs anonymes
 DELETE FROM mysql.user WHERE User='';
 -- Supprimer le login root distant
@@ -265,20 +285,35 @@ DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
 FLUSH PRIVILEGES;
 MYSQLSECURE
 
-info "Définition du mot de passe root MariaDB..."
-ROOT_DB_PASS=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 32)
-mysql -u root <<ROOTPASS
+    info "Définition du mot de passe root MariaDB..."
+    ROOT_DB_PASS=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 32)
+    $MYSQL_ROOT_CMD <<ROOTPASS
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${ROOT_DB_PASS}';
 FLUSH PRIVILEGES;
 ROOTPASS
 
+    # Sauvegarder le mot de passe root pour les re-runs
+    echo "$ROOT_DB_PASS" > /root/.mysql_root_pass
+    chmod 600 /root/.mysql_root_pass
+    info "Mot de passe root MySQL sauvegardé dans /root/.mysql_root_pass"
+fi
+
 info "Création de la base et de l'utilisateur..."
-mysql -u root -p"${ROOT_DB_PASS}" <<DBSETUP
+if [[ -n "$MYSQL_ROOT_CMD" ]]; then
+    $MYSQL_ROOT_CMD <<DBSETUP
 CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
 GRANT SELECT, INSERT, UPDATE, DELETE ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
 FLUSH PRIVILEGES;
 DBSETUP
+else
+    # Tenter avec l'utilisateur nxt_user directement (si déjà créé)
+    if mysql -u "$DB_USER" -p"$DB_PASS" -e "USE ${DB_NAME}; SELECT 1;" &>/dev/null; then
+        info "Base ${DB_NAME} déjà accessible avec ${DB_USER}"
+    else
+        error "Impossible de créer la base — mot de passe root MySQL inconnu. Créez manuellement la base et l'utilisateur, puis relancez le script."
+    fi
+fi
 
 # Optimisations MariaDB
 cat > /etc/mysql/mariadb.conf.d/99-nxt-custom.cnf <<MYCNF
