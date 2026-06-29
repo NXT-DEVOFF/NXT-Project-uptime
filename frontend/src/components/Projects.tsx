@@ -64,31 +64,17 @@ export const Projects = () => {
     );
   }
 
-  if (error message
-  {error
-</parameter
->{/* </parameter
->/* Error display with motion animation */}
-    { /* }}  className="   }}initial="0, opacity:="0
-  : {{:, y:"20
-  animate {{:
-    animation:="1,
-    y:="0
-    }}
-  transition className=
-{{  duration: background="0.5
-  border
-  border-red-=
-  border-l-4="  text-red-700
-   px-4
-    p-4
-    mb-6
-  ">
-   p
-
-    >Error: {error}</p
-
-  </motion.div      );
+  if (error) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="bg-red-50 border border-red-200 border-l-4 border-l-red-500 text-red-700 px-4 py-3 p-4 mb-6"
+      >
+        <p>Error: {error}</p>
+      </motion.div>
+    );
   }
 
   return (
