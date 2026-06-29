@@ -349,37 +349,62 @@ systemctl enable redis-server
 
 info "Configuration de Redis..."
 REDIS_CONF="/etc/redis/redis.conf"
+
+# Sauvegarder la config originale
 cp "$REDIS_CONF" "${REDIS_CONF}.bak.$(date +%s)"
 
-# Appliquer les paramètres sécurisés
+# Supprimer les anciennes lignes ajoutées par un précédent run
+sed -i '/^# Commandes dangereuses désactivées/d' "$REDIS_CONF"
+sed -i '/^rename-command FLUSHDB/d' "$REDIS_CONF"
+sed -i '/^rename-command FLUSHALL/d' "$REDIS_CONF"
+sed -i '/^rename-command DEBUG/d' "$REDIS_CONF"
+
+# Bind uniquement localhost
 sed -i "s/^bind .*/bind 127.0.0.1 ::1/" "$REDIS_CONF"
-sed -i "s/^# requirepass .*/requirepass ${REDIS_PASS}/" "$REDIS_CONF"
-if ! grep -q "^requirepass" "$REDIS_CONF"; then
-    echo "requirepass ${REDIS_PASS}" >> "$REDIS_CONF"
-fi
+
+# Mot de passe — supprimer l'ancien puis ajouter le nouveau
+sed -i '/^requirepass/d' "$REDIS_CONF"
+sed -i '/^# requirepass/d' "$REDIS_CONF"
+echo "requirepass ${REDIS_PASS}" >> "$REDIS_CONF"
+
+# Protected mode
 sed -i 's/^protected-mode.*/protected-mode yes/' "$REDIS_CONF"
 
-# Limiter la mémoire
-if ! grep -q "^maxmemory" "$REDIS_CONF"; then
-    echo "maxmemory 128mb" >> "$REDIS_CONF"
-    echo "maxmemory-policy allkeys-lru" >> "$REDIS_CONF"
-fi
+# Limiter la mémoire (supprimer l'ancien puis ajouter)
+sed -i '/^maxmemory /d' "$REDIS_CONF"
+sed -i '/^maxmemory-policy/d' "$REDIS_CONF"
+echo "maxmemory 128mb" >> "$REDIS_CONF"
+echo "maxmemory-policy allkeys-lru" >> "$REDIS_CONF"
 
-# Désactiver les commandes dangereuses
+# Désactiver les commandes dangereuses (rename vers clé aléatoire, pas "" qui crash)
+FLUSHDB_RENAMED=$(openssl rand -hex 16)
+FLUSHALL_RENAMED=$(openssl rand -hex 16)
+DEBUG_RENAMED=$(openssl rand -hex 16)
 cat >> "$REDIS_CONF" <<REDISECURE
-# Commandes dangereuses désactivées
-rename-command FLUSHDB ""
-rename-command FLUSHALL ""
-rename-command DEBUG ""
+
+# Commandes dangereuses renommées (inaccessibles)
+rename-command FLUSHDB ${FLUSHDB_RENAMED}
+rename-command FLUSHALL ${FLUSHALL_RENAMED}
+rename-command DEBUG ${DEBUG_RENAMED}
 REDISECURE
+
+# Tester la config avant de redémarrer
+if redis-server --test-config "$REDIS_CONF" 2>/dev/null; then
+    info "Configuration Redis valide"
+else
+    warn "Test config Redis échoué — tentative de démarrage quand même"
+fi
 
 systemctl restart redis-server
 
 # Vérifier
+sleep 2
 if redis-cli -a "$REDIS_PASS" ping 2>/dev/null | grep -q PONG; then
     success "Redis installé et fonctionnel"
 else
-    error "Redis ne répond pas — vérifiez la configuration"
+    warn "Redis ne répond pas — diagnostic..."
+    journalctl -u redis-server --no-pager -n 10
+    warn "Redis est optionnel — l'application peut fonctionner sans cache"
 fi
 
 # ============================================================================
